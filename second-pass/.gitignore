@@ -1,0 +1,38 @@
+# Local development & test artifacts — DO NOT publish
+test-bed/
+*.pdf
+*.local.json
+
+# Personal publish guide — names sensitive strings in safety examples, kept local
+PUBLISH.md
+
+# OS clutter
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python (in case render scripts get added later)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node (just in case)
+node_modules/
+
+# Backup / scratch files
+*.bak
+*.orig
+*.tmp
+scratch/
+TODO.local.md
+
+# Active runtime config (user-specific, not template)
+config.json
