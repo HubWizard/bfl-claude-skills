@@ -1,14 +1,34 @@
 #!/usr/bin/env node
 // context-handoff-monitor.js — UserPromptSubmit hook
 // Reads real token usage from the session transcript. When context passes the
-// threshold (default 80% of 200k), injects a directive telling Claude to wrap
-// up at the next good stopping point and run the session-handoff skill.
-// Re-warns only after context grows another 15k tokens (no nagging).
-// Config via env: CLAUDE_CTX_WINDOW (default 200000), CLAUDE_HANDOFF_THRESHOLD (default 0.80)
+// threshold (default 80% of the *model's* context window), injects a directive
+// telling Claude to wrap up at the next good stopping point and run the
+// session-handoff skill. Re-warns only after context grows another 15k tokens.
+//
+// The context window is a per-MODEL property, not a constant — the hook reads
+// the model from the transcript and resolves its window (Opus/Sonnet/Fable = 1M,
+// Haiku = 200k). Hardcoding 200k made handoff fire at 16% on a 1M-window model.
+// Config via env:
+//   CLAUDE_CTX_WINDOW       hard global override for every model (default: per-model map)
+//   CLAUDE_HANDOFF_THRESHOLD fraction of the window to fire at (default 0.80)
 
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+
+// Context window per model, in tokens. Keyed by substring/pattern match so
+// date-suffixed IDs (e.g. claude-haiku-4-5-20251001) resolve correctly.
+// Source: Claude model catalog. Update here when new models ship — one line each.
+function windowForModel(model) {
+  if (!model) return null;
+  const m = String(model).toLowerCase();
+  if (m.includes('haiku')) return 200000;            // Haiku 4.5 = 200k
+  if (/opus-4-(5|6|7|8)/.test(m)) return 1000000;    // Opus 4.5/4.6/4.7/4.8 = 1M
+  if (/sonnet-(5|4-6)/.test(m)) return 1000000;      // Sonnet 5 / 4.6 = 1M
+  if (m.includes('fable') || m.includes('mythos')) return 1000000; // Fable/Mythos 5 = 1M
+  if (m.includes('opus') || m.includes('sonnet')) return 200000;   // older Opus/Sonnet
+  return null;                                       // unknown → caller falls back
+}
 
 function main() {
   let input = '';
@@ -28,24 +48,36 @@ function main() {
   fs.readSync(fd, buf, 0, buf.length, start);
   fs.closeSync(fd);
 
-  // Find the most recent assistant message with usage data (walk lines in reverse)
+  // Find the most recent MAIN-THREAD assistant message with usage data.
+  // Skip isSidechain lines: background subagents (knowledge-extractor etc.)
+  // write their own usage into this transcript, and their context is not ours.
   const lines = buf.toString('utf8').split('\n');
   let used = 0;
+  let model = '';
   for (let i = lines.length - 1; i >= 0; i--) {
     if (!lines[i].includes('"usage"')) continue;
     try {
       const j = JSON.parse(lines[i]);
+      if (j.isSidechain === true) continue; // subagent turn — not the main thread
       const u = j.message && j.message.usage;
       if (u && (u.input_tokens || u.cache_read_input_tokens)) {
+        // Context occupancy = the full prompt the model saw this turn.
+        // Do NOT add output_tokens — the prompt already contains prior outputs;
+        // adding this turn's output double-counts and fires early.
         used = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) +
-               (u.cache_creation_input_tokens || 0) + (u.output_tokens || 0);
+               (u.cache_creation_input_tokens || 0);
+        model = (j.message && j.message.model) || '';
         break;
       }
     } catch { /* partial line at buffer start */ }
   }
   if (!used) return;
 
-  const WINDOW = parseInt(process.env.CLAUDE_CTX_WINDOW || '200000', 10);
+  // Window: hard env override wins; else per-model; else conservative 200k.
+  const envWindow = parseInt(process.env.CLAUDE_CTX_WINDOW || '', 10);
+  const WINDOW = (Number.isFinite(envWindow) && envWindow > 0)
+    ? envWindow
+    : (windowForModel(model) || 200000);
   const THRESHOLD = parseFloat(process.env.CLAUDE_HANDOFF_THRESHOLD || '0.80');
   const pct = used / WINDOW;
   if (pct < THRESHOLD) return;
