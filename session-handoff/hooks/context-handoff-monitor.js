@@ -23,8 +23,12 @@ function windowForModel(model) {
   if (!model) return null;
   const m = String(model).toLowerCase();
   if (m.includes('haiku')) return 200000;            // Haiku 4.5 = 200k
-  if (/opus-4-(5|6|7|8)/.test(m)) return 1000000;    // Opus 4.5/4.6/4.7/4.8 = 1M
-  if (/sonnet-(5|4-6)/.test(m)) return 1000000;      // Sonnet 5 / 4.6 = 1M
+  // Opus 4.5+ and Opus 5+ = 1M. The `[5-9]` arm matters: `claude-opus-5` does NOT
+  // match `opus-4-...`, so before it was added Opus 5 fell through to the
+  // "older Opus" line below and was capped at 200k — which made handoff fire at
+  // ~128% (256k/200k) instead of ~26% of its real window. Bug found 2026-07-25.
+  if (/opus-(4-(5|6|7|8)|[5-9])/.test(m)) return 1000000;
+  if (/sonnet-([5-9]|4-6)/.test(m)) return 1000000;  // Sonnet 4.6 / 5+ = 1M
   if (m.includes('fable') || m.includes('mythos')) return 1000000; // Fable/Mythos 5 = 1M
   if (m.includes('opus') || m.includes('sonnet')) return 200000;   // older Opus/Sonnet
   return null;                                       // unknown → caller falls back
