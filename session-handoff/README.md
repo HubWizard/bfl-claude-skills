@@ -72,8 +72,10 @@ behavior:
 
 - `CLAUDE_HANDOFF_THRESHOLD` — fraction of context window that triggers a
   handoff warning. Default `0.80`.
-- `CLAUDE_CTX_WINDOW` — total context window size in tokens. Default
-  `200000`.
+- `CLAUDE_CTX_WINDOW` — hard global override for the context window, in tokens.
+  Normally unnecessary: the hook resolves the window **per model** from the
+  transcript (Opus 4.5+/5+, Sonnet 4.6/5+, Fable/Mythos 5 = 1M; Haiku 4.5 and
+  legacy Opus/Sonnet = 200k). Unknown models fall back to 200k.
 
 ## Notes
 
@@ -81,6 +83,14 @@ behavior:
   autonomous run mid-turn, only on your next message.
 - Handoff documents are written to `<project>/.claude/handoffs/` and are
   disposable — delete old ones freely.
-- The skill spawns a new terminal window running `claude --remotecontrol`
-  in the same working directory (PowerShell-based spawn commands are in the
-  skill). Adjust that step if you're not on Windows.
+- The skill spawns the continuation session as a new **Windows Terminal tab**
+  (`wt.exe new-tab`) running `claude --remote-control=<slug>` in the same
+  working directory. The flag is hyphenated — `--remotecontrol` is not a real
+  flag. PowerShell spawn commands are in the skill; adjust that step if you're
+  not on Windows.
+- **If you port the spawn step to another platform, carry the environment
+  scrub with it.** A running Claude Code session injects vars into everything
+  it spawns; `NO_COLOR=1` makes the new session render colorless and
+  `CLAUDE_CODE_CHILD_SESSION=1` makes it declare itself a child session. Both
+  travel through the environment, so detaching the process tree does not fix
+  either. The launcher must clear them before invoking `claude`.
